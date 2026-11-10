@@ -1,6 +1,6 @@
 # TASTY_BYTES — Compact Schema Reference
 
-Snowflake database `TASTY_BYTES`. Fictional food-truck network (Snowflake demo dataset) operating across multiple countries; each truck can sell at two locations per day.
+Snowflake database `TASTY_BYTES`. Fictional food-truck network (Snowflake demo dataset) operating across multiple countries; each truck can sell at two locations per day. The database covers Tasty Bytes sales from 2019-01-01 to 2022-11-01.
 
 Format: `column | type | key | domain / notes`
 
@@ -76,7 +76,7 @@ SELECT menu_item_name
 FROM menu, LATERAL FLATTEN(input => menu_item_health_metrics_obj:menu_item_health_metrics) f
 WHERE f.value:is_gluten_free_flag::STRING = 'Y';
 ```
-- Prices here are USD; `order_header.order_total` is in `order_currency`. Check currency before mixing.
+- Prices here are USD; `order_header.order_total` is in `order_header.order_currency`. Even though one would usually check and convert the currency, it has been confirmed that all the distinct values of `order_header.order_currency` are just 'USD', so no currency conversions are needed to be performed.
 
 ## RAW_POS.TRUCK — 450 rows
 Grain: one row per food truck. `franchise_id` → `franchise.franchise_id`. Referenced by `order_header.truck_id`.
@@ -168,7 +168,7 @@ Prefer these over raw joins when they answer the question.
 ## ANALYTICS.ORDERS_V
 Wide denormalized order view. **Grain: one row per order line item** (built on `order_detail`).
 
-Columns: `date` (DATE, derived from `order_ts`), `order_id`, `truck_id`, `order_ts`, `order_detail_id`, `line_number`, `truck_brand_name`, `menu_type`, `primary_city`, `region`, `country`, `franchise_flag`, `franchise_id`, `franchisee_first_name`, `franchisee_last_name`, `location_id`, `customer_id`, `children_count`, `gender`, `marital_status`, `menu_item_id`, `menu_item_name`, `quantity`, `unit_price`, `price`, `order_total`.
+Columns: `date` (DATE, derived from `order_ts`), `order_id`, `truck_id`, `order_ts`, `order_detail_id`, `line_number`, `truck_brand_name`, `menu_type`, `primary_city`, `region`, `country`, `franchise_flag`, `franchise_id`, `franchisee_first_name`, `franchisee_last_name`, `location_id`, `customer_id`, `children_count`, `gender`, `marital_status`, `menu_item_id`, `menu_item_name`, `cost_of_goods_usd,`, `quantity`, `unit_price`, `price`, `order_total`.
 
 - **FAN-OUT:** `order_total` is the whole-order total repeated on every line. `SUM(order_total)` over this view overcounts revenue. Use `SUM(price)` for revenue, or `SUM(DISTINCT ...)`/a pre-aggregation by `order_id` when the order-level total is genuinely needed.
 - `date` is the DATE cast of `order_ts`; use it for daily/monthly grouping.

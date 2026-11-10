@@ -9,6 +9,7 @@ Tasty Bytes operates food trucks in cities across the globe with each truck havi
 > **Tasty Bytes' Mission**
 > "We serve to give people unique food options with high quality items in a safe, convenient and cost effective way. We ensure that the ingredients used are of the highest quality from mostly local food vendors to make sure our success has a positive impact on community partners."
 
+This database covers Tasty Bytes sales from 2019-01-01 to 2022-11-01.
 
 # **Database documentation**
 
@@ -133,7 +134,7 @@ FROM menu,
 WHERE f.value:is_gluten_free_flag::STRING = 'Y';
 ```
 
-> **Gotcha:** `cost_of_goods_usd` and `sale_price_usd` are in USD, but `order_header.order_total` is denominated in `order_currency`. Do not mix the two without checking the currency.
+> **Gotcha:** `cost_of_goods_usd` and `sale_price_usd` are in USD, but `order_header.order_total` is denominated in `order_header.order_currency`. Even though one would usually check and convert the currency, it has been confirmed that all the distinct values of `order_header.order_currency` are just 'USD', so no currency conversions are needed
 
 
 ### Table "truck"
@@ -223,6 +224,7 @@ The columns that appear in this table are the following:
 > **Note:** `line_number` starts at 0, not 1.
 > 
 > **Gotcha:** `order_ts` is `TIMESTAMP_NTZ` — no timezone information. Orders from different countries are not comparable on absolute time.
+
 
 
 ## Schema "RAW_CUSTOMER"
@@ -319,6 +321,7 @@ SELECT
     cl.marital_status,
     od.menu_item_id,
     m.menu_item_name,
+    m.cost_of_goods_usd,
     od.quantity,
     od.unit_price,
     od.price,
