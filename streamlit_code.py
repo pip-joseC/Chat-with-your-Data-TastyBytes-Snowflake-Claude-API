@@ -16,12 +16,17 @@ import anthropic
 from app_backend.backend import *
 
 # TODO:
+# - Checar TODOs marcados en el código del chat
 # - Implement a button or switch that can activate 2 different modes:
 #       - **Precission mode**: This mode guarantees the best output, at the cost of more tokens used by Claude API. It will use the system prompt ``'claude_prompt_fully_improved.md'``.
 #       - **Token-saving mode**: Thid mode sacrifices some accuracy on the final output, but consumes much Claude API less tokens. It will use the system prompt ``'claude_prompt_original.md' 
-# - Checar TODOs marcados en el código del chat
-# - Guardar ls conexiones a Claude y a Snowflake para que no se vuelvan a ejecutar cada vez que hay un rerun (por eso se laguea mucho la app por cada chat, probar luego con un script de prueba)
-
+# - Checar video de Youtube para hacer fondo con degradado, elegir colores azulados y naranjas (colores de Snowflake y Claude), y cambiar el color theme de la app (para que los botones de las tabs en el dashboard no se vean rojos, por ejemplo)
+# - Pedirle a Claude que revise la carpeta donde está el repositorio y que organice los archivos, además de que modifique las partes del código necesarias para la lectura de los archivos ya en sus carpetas correspondientes
+# - Implementar un cuadro de diálogo que pida las credenciales de Claude y Snowflake si le voy a hacer deploy a la app y si puedo pedirle directamente pedir las credenciales (solo si es fácil pues xd)
+#       - Antes de hacer lo anterior, preguntarle a Claude si es buena práctica hacer esto o si tengo que encriptar las credenciales que me den para evitar pedos de seguridad
+# - COn la final version lista, pedirle a Claude que genere múltiples casos de prueba para cada tipo de gráfica o de pregunta (específica o vaga) (preguntas y qué gráficas esperaría), mpinimo 10 ejemplos en total
+#       - Luego, probar las preguntas y las que jalen chido, grabar pantalla de solo la app y guardar los demos en GIFs (verificar si es buena idea con Claude)  
+# Pedirle a Claude que lea el repo y que genere un README detallado con los archivos que hay, que incluya el setup necesario para ejecutar la app (recuerda que cargar la base de datos de Tasty bytes a Snowflake con el primer Notebook es necesario)
 
 ###### SNOWFLAKE AND CLAUDE CONNECTION
 
@@ -150,32 +155,32 @@ if st.session_state.generation_status != 'ready': # Checking if the genearted qu
 else: # If the genearted query is ready, the following will be executed
     # In this case, it will not wait for an user input and, instead, will run it directly on Snowflake
 
-    # ai_answer = st.session_state.ai_answer # Loading the ai answer from the session state
-    # ###### RUNNING SQL QUERY IN SNOWFLAKE AND SOLVING POSSIBLE ERRORS
-    # for attempt in [1,2,3]: # Maximum 2 more attempts (first execution + 2 extra attempts)
-    #     try:
-    #         with st.spinner("Running SQL query on Snowflake..."):
-    #             query_result = session.sql(ai_answer['query']).to_pandas()
-    #     except Exception as e:
-    #         st.warning('An error occured, please wait until Claude fixes it.', icon="⚠️")
-    #         time.sleep(1)
-    #         if attempt == 3: # If maximum attempts reached, raise an error and stop the streamlit program
-    #             st.write('Maximimum number of attempts reached, Claude could not fix the SQL query') # TODO
-    #             break
-    #         # If an error occurs and there are still enough attempts, the fix_bug() function will execute
-    #         error_message = str(e) # Retrieving the error explicitly for Claude
-    #         with st.spinner("Claude is fixing the problem..."):
-    #             ai_answer, used_tokens_now, msg_hist = fix_bug(ai_query_bugged=ai_answer['query'], 
-    #                                                            error_msg=error_message, 
-    #                                                            system_prompt=sys_prompt, 
-    #                                                            messages=st.session_state.claude_messages, 
-    #                                                            client=client)
-    #             st.session_state.tokens += used_tokens_now # Adding up the used tokens
-    #     else: 
-    #         # If no errors where found, there is no need to fix the query and we can break the for loop
-    #         st.session_state.ai_answer = ai_answer # Saving the ai answer on the session state, in case an error was fixed
-    #         st.success('Done!')
-    #         break
+    ai_answer = st.session_state.ai_answer # Loading the ai answer from the session state
+    ###### RUNNING SQL QUERY IN SNOWFLAKE AND SOLVING POSSIBLE ERRORS
+    for attempt in [1,2,3]: # Maximum 2 more attempts (first execution + 2 extra attempts)
+        try:
+            with st.spinner("Running SQL query on Snowflake..."):
+                query_result = session.sql(ai_answer['query']).to_pandas()
+        except Exception as e:
+            st.warning('An error occured, please wait until Claude fixes it.', icon="⚠️")
+            time.sleep(1)
+            if attempt == 3: # If maximum attempts reached, raise an error and stop the streamlit program
+                st.write('Maximimum number of attempts reached, Claude could not fix the SQL query') # TODO
+                break
+            # If an error occurs and there are still enough attempts, the fix_bug() function will execute
+            error_message = str(e) # Retrieving the error explicitly for Claude
+            with st.spinner("Claude is fixing the problem..."):
+                ai_answer, used_tokens_now, msg_hist = fix_bug(ai_query_bugged=ai_answer['query'], 
+                                                               error_msg=error_message, 
+                                                               system_prompt=sys_prompt, 
+                                                               messages=st.session_state.claude_messages, 
+                                                               client=client)
+                st.session_state.tokens += used_tokens_now # Adding up the used tokens
+        else: 
+            # If no errors where found, there is no need to fix the query and we can break the for loop
+            st.session_state.ai_answer = ai_answer # Saving the ai answer on the session state, in case an error was fixed
+            st.success('Done!')
+            break
 
     n = len(query_result)
     final_df = query_result.round(2).head(100) # Rounding the columns of the dataframe that are Decimal type and Limiting the maximum number of rows to the first 200 for saving Claude tokens
@@ -184,7 +189,6 @@ else: # If the genearted query is ready, the following will be executed
 
     st.session_state.dataframe = final_df # Saving the dataframe on a session state variable
     # st.session_state.generated_query = ai_answer['query'] # Saving the generated query on a session state variable
-    st.session_state.generated_query = generated_query # JUST FOR TESTING
 
     sys_prompt_dash = Path('dashboard_prompt.md').read_text(encoding='utf-8')
 
@@ -200,16 +204,6 @@ else: # If the genearted query is ready, the following will be executed
         st.session_state.tokens += used_tokens_now
     st.success('Done!')
     st.session_state.ai_dashboard = ai_answer_dash
-
-    # st.write('Claude Output:', ai_answer_dash) # JUST FOR TEST, DELETE LATER
-    # with open("AI_dashboard_str.txt", "w") as text_file: # JUST FOR TEST, DELETE LATER
-    #     text_file.write(ai_answer_dash) # JUST FOR TEST, DELETE LATER
-
-    # ai_answer_dash = json.loads(ai_answer_dash) # JUST FOR TEST, DELETE LATER Converting the string generated by Claude into an JSON (dict)
-
-    # ############## SAVING THE AI RESPONSE AS A JSON JUST FOR TESTINGGGG
-    # with open("ai_answer_dash.json", "w", encoding="utf-8") as f:
-    #     json.dump(ai_answer_dash, f, indent=4, ensure_ascii=False)
 
     time.sleep(2) # ADDING A 2 SECONDS COOLDOWN JUST FOR TESTING
     st.switch_page("pages/dashboard.py") # Changing page automatically here 

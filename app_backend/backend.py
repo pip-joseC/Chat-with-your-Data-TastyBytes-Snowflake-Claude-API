@@ -8,9 +8,7 @@ from snowflake.snowpark import Session
 
 import time
 import json
-from pathlib import Path
-
-import anthropic
+import altair as alt
 
 
 def add_user_msg(msgs, txt):
@@ -50,21 +48,6 @@ def add_assistant_msg(msgs, txt):
 
     assistant_msg = {'role': 'assistant', 'content':txt}
     msgs.append(assistant_msg)
-
-# def chat(msgs, model, client, max_tokens=1000, system_prompt=None, output_format=None):
-#     params = {
-#         'model': model,
-#         'max_tokens': max_tokens,
-#         'messages': msgs
-#     }
-#     if system_prompt:
-#         params['system'] = system_prompt
-#     if output_format:
-#         params['output_config'] = {'format': output_format}
-
-#     output = client.messages.create(**params)
-#     # Joining all text blocks, and checking if the block is a TextBlock
-#     return "".join(b.text for b in output.content if b.type == "text")
 
 def chat_and_tokens(msgs, model, client, max_tokens=1000, use_cache=True, system_prompt=None, output_format=None):
     """
@@ -122,6 +105,41 @@ def chat_and_tokens(msgs, model, client, max_tokens=1000, use_cache=True, system
     ai_answer = "".join(b.text for b in output.content if b.type == "text")
     return ai_answer, tokens_used
 
+def token_cost(in_tokens, out_tokens, cache_creation_tokens, cache_read_tokens):
+    """
+    Calculating token cost using the updated base cost of Sonnet 5.5 (from Nov 10th 2026 from https://platform.claude.com/docs/es/about-claude/pricing):
+    input tokens: USD 2 / MTok, output tokens: USD 10 / MTok, cache creation input tokens (5 minutes): USD 2.5 / MTok, cache read input tokens: USD 0.1 / MTok
+
+    Parameters
+    ----------
+    in_tokens : int
+        The number of input tokens used.
+    out_tokens : int
+        The number of output tokens used.
+    cache_creation_tokens : int
+        The number of input tokens used to create the cache entry.
+    cache_read_tokens : int
+        The number of input tokens read from the cache.
+
+    Returns
+    ----------
+    final_cost : float
+        Cost in USD of the query.
+    """
+
+    if not cache_creation_tokens: # In case it is None when cache is not written
+        cache_creation_tokens = 0
+    if not cache_read_tokens: # In case it is None when cache is not read
+        cache_read_tokens = 0
+
+    
+    in_cost = 2/1e6
+    out_cost = in_cost*5
+    cache_creat_cost = 2.5/1e6
+    cache_read_cost = 0.2/1e6
+
+    final_cost = in_tokens*in_cost + out_tokens*out_cost + cache_creation_tokens*cache_creat_cost + cache_read_tokens*cache_read_cost
+    return final_cost
 
 def generate_sql(user_question, system, client):
     """
@@ -283,6 +301,86 @@ def generate_sql_after_aclaration(messages, system, clarif, client):
 
     return ai_answer, tokens, messages
 
+def fix_bug(ai_query_bugged, error_msg, system_prompt, messages, client):
+    """
+    Fixes the SQL code using a Claude API call.
+
+    Parameters
+    ----------
+    ai_query_bugged : str
+        The SQL query written by Claude that contains an error
+    error_msg : str
+        The error message raised by Snowpark
+    system_prompt : str
+        System prompt for Claude, with all the specifications and database documentation.
+    messages : list[dict]
+        Message history of user-assistant conversation.
+    client : Anthropic object
+        Connection to Claude API.
+
+    Returns
+    ----------
+    ai_answer : dict
+        Claude's answer wwith the code fixed with a JSON structure.
+    tokens : list[int]
+        A list of input, output and cache tokens used on the Claude API call. 
+        Its structure is ``[input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens]``.
+    messages : list[dict]
+        Message history of user-assistant conversation.
+    """ 
+
+    prompt = f""" 
+The SQL query below was generated earlier in this conversation and failed when executed in Snowflake.
+
+<failed_query>
+{ai_query_bugged}
+</failed_query>
+
+<snowflake_error>
+{error_msg}
+</snowflake_error>
+
+Fix the cause of the error, but also review the query and fix other problems you might find. Keep the original intent, the schema rules and the SQL style. 
+Reply with the usual JSON object, always with "question_type": "sql" (never "clarify"); in "explanation", state in one sentence what was wrong and what you changed.
+    """
+
+    # Creating a JSON Schema that Claude will use for the output
+    sql_schema = { # Now, the only possible output schema could be the one where it outputs the SQL query
+        "type": "json_schema",
+        "schema": { 
+            "type": "object",
+            "properties": {
+                "question_type": {"type": "string", "const": "sql"},
+                "query": {
+                    "type": "string",
+                    "description": "Executable SQL Query that answers the question.",
+                },
+                "explanation": {
+                    "type": "string",
+                    "description": "Brief explanation of the query of no more than 3 sentences.",
+                },
+            },
+            "required": ["question_type", "query", "explanation"],
+            "additionalProperties": False,
+        },
+    }
+
+    add_user_msg(messages, prompt) # Adding the new prompt to the message history
+
+    ai_answer, tokens = chat_and_tokens( # Calling Claude API to write the SQL query
+        messages,
+        model='claude-sonnet-5-5',
+        client=client, 
+        max_tokens=2000,
+        system_prompt=system_prompt,
+        output_format=sql_schema,
+    )
+
+    add_assistant_msg(messages, ai_answer) # Adding the user question prompt to the message history
+    ai_answer = json.loads(ai_answer) # Converting the string generated by Claude into an JSON (dict)
+
+    return ai_answer, tokens, messages
+
 def generate_dashboard(user_question, clarifs, sql_explanation, csv_text, n_rows, truncated, system, client):
     """
     Generates the interpretation, key metrics and the chart properties for the final dashboard.
@@ -428,87 +526,6 @@ def generate_dashboard(user_question, clarifs, sql_explanation, csv_text, n_rows
 
     return ai_answer, tokens # The message history will be needed for multi-turn conversations in case an aclaration is needed
 
-def fix_bug(ai_query_bugged, error_msg, system_prompt, messages, client):
-    """
-    Fixes the SQL code using a Claude API call.
-
-    Parameters
-    ----------
-    ai_query_bugged : str
-        The SQL query written by Claude that contains an error
-    error_msg : str
-        The error message raised by Snowpark
-    system_prompt : str
-        System prompt for Claude, with all the specifications and database documentation.
-    messages : list[dict]
-        Message history of user-assistant conversation.
-    client : Anthropic object
-        Connection to Claude API.
-
-    Returns
-    ----------
-    ai_answer : dict
-        Claude's answer wwith the code fixed with a JSON structure.
-    tokens : list[int]
-        A list of input, output and cache tokens used on the Claude API call. 
-        Its structure is ``[input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens]``.
-    messages : list[dict]
-        Message history of user-assistant conversation.
-    """ 
-
-    prompt = f""" 
-The SQL query below was generated earlier in this conversation and failed when executed in Snowflake.
-
-<failed_query>
-{ai_query_bugged}
-</failed_query>
-
-<snowflake_error>
-{error_msg}
-</snowflake_error>
-
-Fix the cause of the error, but also review the query and fix other problems you might find. Keep the original intent, the schema rules and the SQL style. 
-Reply with the usual JSON object, always with "question_type": "sql" (never "clarify"); in "explanation", state in one sentence what was wrong and what you changed.
-    """
-
-    # Creating a JSON Schema that Claude will use for the output
-    sql_schema = { # Now, the only possible output schema could be the one where it outputs the SQL query
-        "type": "json_schema",
-        "schema": { 
-            "type": "object",
-            "properties": {
-                "question_type": {"type": "string", "const": "sql"},
-                "query": {
-                    "type": "string",
-                    "description": "Executable SQL Query that answers the question.",
-                },
-                "explanation": {
-                    "type": "string",
-                    "description": "Brief explanation of the query of no more than 3 sentences.",
-                },
-            },
-            "required": ["question_type", "query", "explanation"],
-            "additionalProperties": False,
-        },
-    }
-
-    add_user_msg(messages, prompt) # Adding the new prompt to the message history
-
-    ai_answer, tokens = chat_and_tokens( # Calling Claude API to write the SQL query
-        messages,
-        model='claude-sonnet-5-5',
-        client=client, 
-        max_tokens=2000,
-        system_prompt=system_prompt,
-        output_format=sql_schema,
-    )
-
-    add_assistant_msg(messages, ai_answer) # Adding the user question prompt to the message history
-    ai_answer = json.loads(ai_answer) # Converting the string generated by Claude into an JSON (dict)
-
-    return ai_answer, tokens, messages
-
-
 def stream_ai_response(ai_answer):
     # Function for writing ai responses as a stream of text
     for word in ai_answer.split():
@@ -523,6 +540,72 @@ def st_chat_msg(role, txt, avatar=None):
         elif role == 'assistant':
             st.write_stream(stream_ai_response(txt)) # If role is assistant, it will show the text as a stream of words 
     st.session_state.messages.append({'role':role, 'content':txt})
+
+def set_axis(cls, spec):
+    # Axis set up
+    # ``cls`` should X or Y altair objects (cls = alt.X / alt.Y)
+    # ``spec`` are the specifications of the given axis (chart_specs['x'] / chart_specs['y'])
+    return cls(field=spec['field'], type=spec['type'], title=spec['title'],
+               sort=spec['sort'] or alt.Undefined,
+               axis=alt.Axis(format=spec['format']) if spec['format'] else alt.Undefined)
+
+def set_color(spec, mark):
+    # Color set up
+    # The 'format' goes directly on the legend. 
+    # On Heatmap (chart_specs['mark']='rect'), the color is the metric itself
+    kw = {}
+    if spec['format']: # Only in case chart_specs['color']['format'] is not None
+        kw['legend'] = alt.Legend(format=spec['format'])
+    if mark == 'rect': # Only in case the graph is a heatmap
+        kw['scale'] = alt.Scale(scheme='blues')
+    return alt.Color(field=spec['field'], type=spec['type'], title=spec['title'],
+                     sort=spec['sort'] or alt.Undefined, **kw)
+
+def build_graph(data, specs):
+    # Returns an alt.Chart object, or none if no graph can be made (chart_specs['mark']=None)
+
+    MARKS = {'bar': 'mark_bar', 'line': 'mark_line', 'point': 'mark_point', 'rect': 'mark_rect'} # marks dict with the corresponding mark name for alt.Chart
+    if not specs or specs.get('mark') not in MARKS: # In case mark is None or an unexpected mark is made up
+        return None
+
+    channels = ["x", "y"] + (["color"] if specs["color"] else []) # Checking every channel (every key that contains a dict value on specs) and checking if 'color' is None or not
+    fields = [specs[c]['field'] for c in channels] + list(specs.get('tooltip') or []) # Importing all the fields listed in every channel, just for the folowing verification
+    if any(f not in data.columns for f in fields):  # If an column on specified on 'field' or 'tooltip' does not exist (hallucination from Claude), it will return None
+        return None
+
+    data = data.copy() # Copying the dataframe, so that the transformations only affect this new one
+
+    # Transforming the fields that will be graphed if they are quatitative or temporal into the correct data type
+    for c in channels:
+        f, t = specs[c]['field'], specs[c]['type'] # Obtaining 2 lists, one with fields and the other with their corresponding type
+        if t == 'quantitative':
+            data[f] = pd.to_numeric(data[f])
+        elif t == 'temporal':
+            data[f] = pd.to_datetime(data[f])
+
+    mark = specs['mark'] # Getting the type of graph ("mark type") that will be made
+
+    # Obtaining the corresponging altair chart (alt.Chart(data).mark_bar() for 'bar' mark type, and so on...) and adding points just in case the graph is a line graph 
+    chart = getattr(alt.Chart(data), MARKS[mark])(**({'point': True} if mark == 'line' else {}))
+    chart = chart.encode(
+        x=set_axis(alt.X, specs['x']), # Using set_axis() for X axis
+        y=set_axis(alt.Y, specs['y']), # Using set_axis() for Y axis
+        color=set_color(specs['color'], mark) if specs.get('color') else alt.Undefined, # Using set_color() for color if it exists, but if it is None, it uses alt.Undefined instead
+        tooltip=specs.get('tooltip') or alt.Undefined, # Getting 'tooltip' and using it if it exists, but if it is None, it uses alt.Undefined instead
+    )
+
+    props = {'title': specs['title']} # Adding the title in properties
+
+    # For horizontal bars/heatmap with many categoric types, the category labels can be jammed up easilly if there are more than 10
+    if specs['y']['type'] == 'nominal': 
+        props['height'] = alt.Step(28) # Setting each category height to 28 px each, so that the graph can be readable
+    return chart.properties(**props) # retrunging the chart object with the properties set up
+
+# chart_specs['title'] ->  'Average lifetime sales per loyalty member by country'
+# chart_specs['x'] -> {'field': 'AVG_TOTAL_SALES', 'type': 'quantitative', 'title': 'Avg sales per member (USD)', 'sort': None, 'format': '$,.0f'}
+# chart_specs['y'] -> {'field': 'COUNTRY', 'type': 'nominal', 'title': 'Country', 'sort': '-x', 'format': None}
+# chart_specs['color'] -> None
+# chart_specs['tooltip'] -> ['COUNTRY', 'AVG_TOTAL_SALES', 'AVG_VISITED_LOCATIONS', 'NUMBER_MEMBERS']
 
 
 #################################### WORKING CODE ####################################

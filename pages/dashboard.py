@@ -21,9 +21,7 @@ from app_backend.backend import *
 with open("ai_answer_dash.json", "r") as file:
     ai_answer_dash = json.load(file)
 
-
 st.session_state.generation_status = 'ready' # Skipping Claude generation
-# TODO: Also skip the snowflake step
 st.session_state.user_question = 'Is the loyalty program working?' 
 st.session_state.aclarations = {'clarif_question': 'What does "working" mean to you? How would you like to judge the loyalty program? By country or by client and by which metric?', 
                                 'user_clarif': 'I would like to judge the loyalty program using the average total sales and average number of locations visited per loyalty member, by country.'}
@@ -45,6 +43,7 @@ st.title('Dashboard', text_alignment='center')
 st.divider()
 
 
+st.subheader('Answer to your question:')
 # Displaying the interpretation and insights obtained from the query output
 insights = ai_answer_dash['interpretation'].replace("$", "\\$") # Loading the interpretation and replacing the "$" sign to not confuse with LateX formatting
 st.write_stream(stream_ai_response(insights)) # Writing the interpretation from the result as a stream of words
@@ -69,46 +68,20 @@ elif n_cols == 3:
 
 ###### GRAPHING THE RESULT USING CLAUDE TO COLLECT INSIGHTS
 
-# TODO: CORRER LA TEST RUN THE UNA VEZ Y GUARDAR EL JSON GENERADO PARA EL DASHBOARD EN UN ARCHIVO, Y PARA FUTURAS RUNS, CARGAR ESE ARCHIVO PARA HACER PRUEBAS 
-# TODO: HACER AQUÍ O EN EL BACKEND (MEJOR) LAS FUNCIONES PAR HACER LAS GRÁFICAS CON LAS ESPECIFICACIONES DEL DASHBOARD
-
-chart_specs = ai_answer_dash['chart'] # Loading the chart specs created by Claude
-
+final_df = st.session_state.dataframe # Loading the final dataframe
 st.divider()
-# Display Results in Tabs 
-chart_tab, dataframe_tab, query_tab = st.tabs(["Chart", "Raw Data", "SQL Query"]) #Creating the 3 tabs that will display the chart, the DF and the SQL query
 
+graph_fig = build_graph(final_df, ai_answer_dash['chart']) # Creating the final graph for the dashboard, using Claude's generated specifications
 
-# ALTAIR GRAPH CODE PREVIEW 
-# def get_city_sales_chart(sales_data: pd.DataFrame):
-#     # This function builds an Altair (python library) line chart showing daily sales by city.
-#     sales_data["SUM_ORDERS"] = pd.to_numeric(sales_data["SUM_ORDERS"])
-#     sales_data["DATE"] = pd.to_datetime(sales_data["DATE"])
+if graph_fig is not None:
+    # Display Results in 3 Tabs 
+    chart_tab, dataframe_tab, query_tab = st.tabs(["Chart", "Raw Data", "SQL Query"]) # Creating the 3 tabs that will display the chart, the DF and the SQL query
+    chart_tab.altair_chart(graph_fig, width='stretch')  # en Streamlit reciente: width='stretch'
+else:
+    # Display Results 2 in Tabs 
+    dataframe_tab, query_tab = st.tabs(["Raw Data", "SQL Query"]) # Creating only 2 tabs: the DF and the SQL query (since no chart was made here)
 
-#     # Create a multi-line chart colored by city
-#     chart = (
-#         alt.Chart(sales_data)
-#         .mark_line(point=False, tooltip=True) #makes the chartline and enables the tooltip view when hovering it with the cursor
-#         .encode(
-#             alt.X("DATE", title="Date"), #Specifying which column name will be the X axis and its label
-#             alt.Y("SUM_ORDERS", title="Total Orders Sum USD"), #Specifying which column name will be the Y axis and its label
-#             color="PRIMARY_CITY", #Specifying that the City will define different color groups of lines
-#         )
-#     )
-#     return chart
+dataframe_tab.dataframe(final_df, width='stretch') # Showing the final dataframe
+query_tab.code(st.session_state.generated_query, "sql") # Showing the generated sql query
 
-# get_city_sales_chart(sales_data) #Generating the chart with the results
-# hart_tab.altair_chart(sales_fig, width='stretch')
-
-chart_tab.write('PLACEHOLDER FOR CHART TODO LATER')
-
-
-
-# chart_tab.altair_chart(sales_fig, width='stretch')
-dataframe_tab.dataframe(st.session_state.dataframe, width='stretch')
-query_tab.code(st.session_state.generated_query, "sql")
-
-
-# snow = st.button(label='Press for Snow')
-# if snow: # For a Snowflake celebration
-#     st.snow()
+st.toast(f'Dashboard generated successfully!\nClaude token cost: ${token_cost(st.session_state.tokens)} USD', icon="🎉") # If everyting was executed correctly, an snowflake animation will be displayed on the screen!
