@@ -1,24 +1,26 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
-from snowflake.snowpark import Session
-import altair as alt
-import os
-from dotenv import load_dotenv
-import time
-from PIL import Image
-from pathlib import Path
 import json
 
-from snowflake.snowpark import Session
-import anthropic
+from app_backend.prompting import *
+from app_backend.streamlit import *
 
-from app_backend.backend import *
+# Backgrounf for the app
+background = """
+<style>
+[data-testid="stMain"] {
+background: linear-gradient(to bottom, #004e92, #000428); /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+}
+</style>
+"""
+
+st.markdown(background, unsafe_allow_html=True)
 
 ################################################################################
 # JUST FOR TESTING: CREATING TEST VARIABLES TO CHECK HOW THE APP LOOKS AND WORKS
 ############## LOADING THE AI RESPONSE FROM THE JSON JUST FOR TESTINGGGG
-with open("ai_answer_dash.json", "r") as file:
+with open("data/ai_answer_dash.json", "r") as file:
     ai_answer_dash = json.load(file)
 
 st.session_state.generation_status = 'ready' # Skipping Claude generation
@@ -27,7 +29,8 @@ st.session_state.aclarations = {'clarif_question': 'What does "working" mean to 
                                 'user_clarif': 'I would like to judge the loyalty program using the average total sales and average number of locations visited per loyalty member, by country.'}
 st.session_state.ai_answer = {'explanation': "This query returns one row per country, showing the number of loyalty members who have placed at least one order (the view only includes customers with orders), the average lifetime sales per member (`total_sales`, the sum of `order_total` per customer), and the average number of distinct locations each member has visited. Countries are ranked from highest to lowest average sales per member. Note that `country` is the customer's residence, not where purchases happened."}
 generated_query = 'SELECT\n    c.country,\n    COUNT(DISTINCT c.customer_id) AS number_members,\n    AVG(c.total_sales) AS avg_total_sales,\n    AVG(ARRAY_SIZE(c.visited_location_ids_array)) AS avg_visited_locations\nFROM tasty_bytes.analytics.customer_loyalty_metrics_v AS c\nGROUP BY 1\nORDER BY 3 DESC;'
-query_result = pd.read_csv('test_df.csv')
+query_result = pd.read_csv('data/test_df.csv')
+st.session_state.tokens = np.ones(4)*1000
 
 final_df = query_result.round(2).head(100) # Rounding the columns of the dataframe that are Decimal type and Limiting the maximum number of rows to the first 200 for saving Claude tokens
 
@@ -76,7 +79,7 @@ graph_fig = build_graph(final_df, ai_answer_dash['chart']) # Creating the final 
 if graph_fig is not None:
     # Display Results in 3 Tabs 
     chart_tab, dataframe_tab, query_tab = st.tabs(["Chart", "Raw Data", "SQL Query"]) # Creating the 3 tabs that will display the chart, the DF and the SQL query
-    chart_tab.altair_chart(graph_fig, width='stretch')  # en Streamlit reciente: width='stretch'
+    chart_tab.altair_chart(graph_fig, width='stretch', theme=None)  # en Streamlit reciente: width='stretch'
 else:
     # Display Results 2 in Tabs 
     dataframe_tab, query_tab = st.tabs(["Raw Data", "SQL Query"]) # Creating only 2 tabs: the DF and the SQL query (since no chart was made here)
@@ -84,4 +87,4 @@ else:
 dataframe_tab.dataframe(final_df, width='stretch') # Showing the final dataframe
 query_tab.code(st.session_state.generated_query, "sql") # Showing the generated sql query
 
-st.toast(f'Dashboard generated successfully!\nClaude token cost: ${token_cost(st.session_state.tokens)} USD', icon="🎉") # If everyting was executed correctly, an snowflake animation will be displayed on the screen!
+st.toast(f'Dashboard generated successfully!\nClaude token cost: ${round(token_cost(*st.session_state.tokens), 2)} USD', icon="🎉") # If everyting was executed correctly, an snowflake animation will be displayed on the screen!

@@ -1,32 +1,35 @@
 import numpy as np
-import pandas as pd
 import streamlit as st
 from snowflake.snowpark import Session
-import altair as alt
 import os
 from dotenv import load_dotenv
 import time
 from PIL import Image
 from pathlib import Path
-
 from snowflake.snowpark import Session
 import anthropic
 
 # Importing my own made functions
-from app_backend.backend import *
+from app_backend.prompting import *
+from app_backend.streamlit import *
 
 # TODO:
-# - Checar TODOs marcados en el código del chat
-# - Implement a button or switch that can activate 2 different modes:
-#       - **Precission mode**: This mode guarantees the best output, at the cost of more tokens used by Claude API. It will use the system prompt ``'claude_prompt_fully_improved.md'``.
-#       - **Token-saving mode**: Thid mode sacrifices some accuracy on the final output, but consumes much Claude API less tokens. It will use the system prompt ``'claude_prompt_original.md' 
-# - Checar video de Youtube para hacer fondo con degradado, elegir colores azulados y naranjas (colores de Snowflake y Claude), y cambiar el color theme de la app (para que los botones de las tabs en el dashboard no se vean rojos, por ejemplo)
-# - Pedirle a Claude que revise la carpeta donde está el repositorio y que organice los archivos, además de que modifique las partes del código necesarias para la lectura de los archivos ya en sus carpetas correspondientes
 # - Implementar un cuadro de diálogo que pida las credenciales de Claude y Snowflake si le voy a hacer deploy a la app y si puedo pedirle directamente pedir las credenciales (solo si es fácil pues xd)
 #       - Antes de hacer lo anterior, preguntarle a Claude si es buena práctica hacer esto o si tengo que encriptar las credenciales que me den para evitar pedos de seguridad
 # - COn la final version lista, pedirle a Claude que genere múltiples casos de prueba para cada tipo de gráfica o de pregunta (específica o vaga) (preguntas y qué gráficas esperaría), mpinimo 10 ejemplos en total
 #       - Luego, probar las preguntas y las que jalen chido, grabar pantalla de solo la app y guardar los demos en GIFs (verificar si es buena idea con Claude)  
 # Pedirle a Claude que lea el repo y que genere un README detallado con los archivos que hay, que incluya el setup necesario para ejecutar la app (recuerda que cargar la base de datos de Tasty bytes a Snowflake con el primer Notebook es necesario)
+
+# Backgrounf for the app
+background = """
+<style>
+[data-testid="stAppScrollToBottomContainer"] {
+background: linear-gradient(to bottom, #004e92, #000428); /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+}
+</style>
+"""
+
+st.markdown(background, unsafe_allow_html=True)
 
 ###### SNOWFLAKE AND CLAUDE CONNECTION
 
@@ -59,6 +62,16 @@ if 'snow_session' not in st.session_state: # Connecting to Snwoflake and saving 
     session = Session.builder.configs(connection_params).create()
     st.session_state.snow_session = session # Saving the connection on the session state
 
+if 'messages' not in st.session_state: # Initialize chat history
+    st.session_state.messages = []
+if 'generation_status' not in st.session_state: # Initialize generation status variable
+    st.session_state.generation_status = 'initialized'
+if 'aclarations' not in st.session_state:
+    st.session_state.aclarations = {}
+if 'claude_mode' not in st.session_state:
+    st.session_state.claude_mode = ':rainbow[Precission Mode]'
+if 'mode_disabled' not in st.session_state:
+    st.session_state.mode_disabled = False
 
 # APP displayed text
 st.markdown('# :truck: Tasty Bytes Chatbot :hamburger:', text_alignment='center')
@@ -67,60 +80,80 @@ st.divider()
 st.markdown("Write a question in natural language about Tasty Bytes current performance *(database date range: 2019-01-01 - 2022-11-01)*.")
 # st.text("\n")
 st.markdown('Be specific for better results, but if you are not sure what to ask, you can ask a generic question and Claude will guide you.')
+
+
+# TODO: Adding the "Precission mode" or "Token-saving mode" option
+st.radio(
+    "**Choose a Claude mode:**",
+    [':rainbow[Precission Mode]', "*Token-saving Mode*"],
+    captions=[
+        "This mode guarantees the best output, at the cost of more tokens used by Claude API. (It will use the system prompt `'claude_prompt_fully_improved.md'`, which is very specific but very long too.)",
+        "This mode sacrifices some accuracy on the final output, but consumes much Claude API less tokens. (It will use the system prompt `'claude_prompt_original.md'`, which is very short but not to clear.)"
+    ],
+    key='claude_mode',
+    disabled=st.session_state.mode_disabled
+)
+
 st.divider()
 # st.text_input()
-
-
-if 'messages' not in st.session_state: # Initialize chat history
-    st.session_state.messages = []
-if 'claude_messages' not in st.session_state: # Initialize chat history for the Claude API
-    st.session_state.claude_messages = []
-if 'generation_status' not in st.session_state: # Initialize generation status variable
-    st.session_state.generation_status = 'initialized'
-if 'tokens' not in st.session_state: # Initialize tokens used array
-    st.session_state.tokens = np.zeros(4)
-if 'user_question' not in st.session_state:
-    st.session_state.user_question = ''
-if 'aclarations' not in st.session_state:
-    st.session_state.aclarations = {}
-# if 'ai_answer' not in st.session_state: # Initialize ai_answer variable where the generated SQL query may be found
-#     st.session_state.ai_answer = {}
 
 # Display chat messages from history on app rerun
 for message in st.session_state.messages:
     with st.chat_message(message['role']):
         st.markdown(message['content'])
 
-image = Image.open('Claude full icon orange.png').resize((30, 30)) #Loading Claude Icon image and resizing
+image = Image.open('assets/Claude full icon orange.png').resize((30, 30)) #Loading Claude Icon image and resizing
 
-# Loading system prompt
-sys_prompt = Path('claude_prompt_fully_improved.md').read_text(encoding='utf-8')
+# Loading system prompt, depending on the selected mode
+if st.session_state.claude_mode == ':rainbow[Precission Mode]':
+    sys_prompt = Path('prompts/claude_prompt_fully_improved.md').read_text(encoding='utf-8')
+else: 
+    sys_prompt = Path('prompts/claude_prompt_original.md').read_text(encoding='utf-8')
 
-################################################################################
-# JUST FOR TESTING: CREATING TEST VARIABLES TO CHECK HOW THE APP LOOKS AND WORKS
+# ################################################################################
+# # JUST FOR TESTING: CREATING TEST VARIABLES TO CHECK HOW THE APP LOOKS AND WORKS
 
-st.session_state.generation_status = 'ready' # Skipping Claude generation
-# TODO: Also skip the snowflake step
-st.session_state.user_question = 'Is the loyalty program working?' 
-st.session_state.aclarations = {'clarif_question': 'What does "working" mean to you? How would you like to judge the loyalty program? By country or by client and by which metric?', 
-                                'user_clarif': 'I would like to judge the loyalty program using the average total sales and average number of locations visited per loyalty member, by country.'}
-st.session_state.ai_answer = {'explanation': "This query returns one row per country, showing the number of loyalty members who have placed at least one order (the view only includes customers with orders), the average lifetime sales per member (`total_sales`, the sum of `order_total` per customer), and the average number of distinct locations each member has visited. Countries are ranked from highest to lowest average sales per member. Note that `country` is the customer's residence, not where purchases happened."}
-generated_query = 'SELECT\n    c.country,\n    COUNT(DISTINCT c.customer_id) AS number_members,\n    AVG(c.total_sales) AS avg_total_sales,\n    AVG(ARRAY_SIZE(c.visited_location_ids_array)) AS avg_visited_locations\nFROM tasty_bytes.analytics.customer_loyalty_metrics_v AS c\nGROUP BY 1\nORDER BY 3 DESC;'
-query_result = pd.read_csv('test_df.csv')
+# st.session_state.generation_status = 'ready' # Skipping Claude generation
+# st.session_state.user_question = 'Is the loyalty program working?' 
+# st.session_state.aclarations = {'clarif_question': 'What does "working" mean to you? How would you like to judge the loyalty program? By country or by client and by which metric?', 
+#                                 'user_clarif': 'I would like to judge the loyalty program using the average total sales and average number of locations visited per loyalty member, by country.'}
+# st.session_state.ai_answer = {'explanation': "This query returns one row per country, showing the number of loyalty members who have placed at least one order (the view only includes customers with orders), the average lifetime sales per member (`total_sales`, the sum of `order_total` per customer), and the average number of distinct locations each member has visited. Countries are ranked from highest to lowest average sales per member. Note that `country` is the customer's residence, not where purchases happened."}
+# generated_query = 'SELECT\n    c.country,\n    COUNT(DISTINCT c.customer_id) AS number_members,\n    AVG(c.total_sales) AS avg_total_sales,\n    AVG(ARRAY_SIZE(c.visited_location_ids_array)) AS avg_visited_locations\nFROM tasty_bytes.analytics.customer_loyalty_metrics_v AS c\nGROUP BY 1\nORDER BY 3 DESC;'
+# query_result = pd.read_csv('data/test_df.csv')
 
-#################################################################################
+# #################################################################################
+
+# st.markdown(
+#     """
+#     <style>
+#     /* Outer bottom bar / container around chat_input */
+#     [data-testid="stBottomBlockContainer"] > div {
+#         background-color: #abf0ff;
+#     }
+
+#     /* Text area / typed text & cursor inside the input */
+#     [data-testid="stChatInput"] textarea {
+#         background-color: #1e293b;
+#         color: #f8fafc;
+#         caret-color: #38bdf8;
+#     }
+#     </style>
+#     """,
+#     unsafe_allow_html=True,
+# )
 
 if st.session_state.generation_status != 'ready': # Checking if the genearted query is not ready yet 
     # Reacting to the user 
-    if user_input := st.chat_input("Ask anything about Tasty Bytes"): # used the := operator to assign the user's input to the prompt variable and checked if it's not None in the same line
+    if user_input := st.chat_input("Ask anything about Tasty Bytes"): # used the := operator to assign the user's input to the prompt variable and checked if it's not None in the same line        
         # This will execute after the user has enter their prompt
 
+        st.session_state.mode_disabled = True # Disabling the "Choose a Claude mode" radio button after receibing an user input
         # Showing the user question in the chat and saving it on the streamlit message history 
         st_chat_msg(role='user', txt=user_input)
         if st.session_state.generation_status == 'initialized':
             ### SQL QUERY GENERATION ###
             with st.spinner("Trying to generate the query..."): # Adding a loading spinner for this process
-                ai_answer, used_tokens, msg_hist = generate_sql(user_question=user_input, system=sys_prompt, client=client)
+                ai_answer, used_tokens, msg_hist = generate_sql(user_question=user_input, system=sys_prompt, client=st.session_state.claude_client)
                 st.session_state.user_question = user_input # Saving the user question on this session variable
                 st.session_state.ai_answer = ai_answer # Saving the generated query and explanation on this session variable
                 st.session_state.claude_messages = msg_hist # Saving the generated Claude chat history on this session variable
@@ -143,7 +176,7 @@ if st.session_state.generation_status != 'ready': # Checking if the genearted qu
                 ai_answer, used_tokens_now, msg_hist = generate_sql_after_aclaration(messages=st.session_state.claude_messages, 
                                                                                      system=sys_prompt, 
                                                                                      clarif=user_input, 
-                                                                                     client=client)
+                                                                                     client=st.session_state.claude_client)
                 st.session_state.aclarations['user_clarif'] = user_input # Saving the response of the user to the AI question for clarification
                 st.session_state.ai_answer = ai_answer # Saving the generated query and explanation on this session variable
                 st.session_state.claude_messages = msg_hist # Saving the generated Claude chat history on this session variable
@@ -165,7 +198,7 @@ else: # If the genearted query is ready, the following will be executed
             st.warning('An error occured, please wait until Claude fixes it.', icon="⚠️")
             time.sleep(1)
             if attempt == 3: # If maximum attempts reached, raise an error and stop the streamlit program
-                st.write('Maximimum number of attempts reached, Claude could not fix the SQL query') # TODO
+                st.warning('Maximimum number of attempts reached, Claude could not fix the SQL query. Please try again and be more specific with your question.', icon="⚠️")
                 break
             # If an error occurs and there are still enough attempts, the fix_bug() function will execute
             error_message = str(e) # Retrieving the error explicitly for Claude
@@ -174,7 +207,7 @@ else: # If the genearted query is ready, the following will be executed
                                                                error_msg=error_message, 
                                                                system_prompt=sys_prompt, 
                                                                messages=st.session_state.claude_messages, 
-                                                               client=client)
+                                                               client=st.session_state.claude_client)
                 st.session_state.tokens += used_tokens_now # Adding up the used tokens
         else: 
             # If no errors where found, there is no need to fix the query and we can break the for loop
@@ -182,31 +215,34 @@ else: # If the genearted query is ready, the following will be executed
             st.success('Done!')
             break
 
-    n = len(query_result)
-    final_df = query_result.round(2).head(100) # Rounding the columns of the dataframe that are Decimal type and Limiting the maximum number of rows to the first 200 for saving Claude tokens
-    is_truncated = True if len(final_df) < n else False # Checking wether the table was truncated or not (If rows were removed after showing the first 200 rows)
-    csv_result = final_df.to_csv(index=False) # Converting it into CSV text
+    if attempt < 3:
+        n = len(query_result)
+        final_df = query_result.round(2).head(100) # Rounding the columns of the dataframe that are Decimal type and Limiting the maximum number of rows to the first 200 for saving Claude tokens
+        is_truncated = True if len(final_df) < n else False # Checking wether the table was truncated or not (If rows were removed after showing the first 200 rows)
+        csv_result = final_df.to_csv(index=False) # Converting it into CSV text
 
-    st.session_state.dataframe = final_df # Saving the dataframe on a session state variable
-    # st.session_state.generated_query = ai_answer['query'] # Saving the generated query on a session state variable
+        st.session_state.dataframe = final_df # Saving the dataframe on a session state variable
+        # st.session_state.generated_query = ai_answer['query'] # Saving the generated query on a session state variable
 
-    sys_prompt_dash = Path('dashboard_prompt.md').read_text(encoding='utf-8')
+        sys_prompt_dash = Path('prompts/dashboard_prompt.md').read_text(encoding='utf-8')
 
-    with st.spinner("Finally, claude is generating the final dashboard with the results..."):
-        ai_answer_dash, used_tokens_now = generate_dashboard(user_question=st.session_state.user_question, # TODO: NEEDS TO BE TESTED IF IT WORKS PROPERLY
-                                                             clarifs=st.session_state.aclarations, 
-                                                             sql_explanation=st.session_state.ai_answer['explanation'], 
-                                                             csv_text=csv_result, 
-                                                             n_rows=n, 
-                                                             truncated=is_truncated, 
-                                                             system=sys_prompt_dash, 
-                                                             client=st.session_state.claude_client) 
-        st.session_state.tokens += used_tokens_now
-    st.success('Done!')
-    st.session_state.ai_dashboard = ai_answer_dash
+        with st.spinner("Finally, claude is generating the final dashboard with the results..."):
+            ai_answer_dash, used_tokens_now = generate_dashboard(user_question=st.session_state.user_question, 
+                                                                clarifs=st.session_state.aclarations, 
+                                                                sql_explanation=st.session_state.ai_answer['explanation'], 
+                                                                csv_text=csv_result, 
+                                                                n_rows=n, 
+                                                                truncated=is_truncated, 
+                                                                system=sys_prompt_dash, 
+                                                                client=st.session_state.claude_client) 
+            st.session_state.tokens += used_tokens_now
+        st.success('Done!')
+        st.session_state.ai_dashboard = ai_answer_dash
 
-    time.sleep(2) # ADDING A 2 SECONDS COOLDOWN JUST FOR TESTING
-    st.switch_page("pages/dashboard.py") # Changing page automatically here 
+        time.sleep(2) # ADDING A 2 SECONDS COOLDOWN JUST FOR TESTING
+        st.switch_page("pages/dashboard.py") # Changing page automatically here 
+    else:
+        pass
 
 ############ SCRIPT TO RUN STREAMLIT ON CONDA ENVIRONMENT
 # & C:\Users\sorak\miniconda3\envs\ClaudeSnowflake\python.exe -m streamlit run "c:/Users/sorak/Documents/##REPOSITORIOS/Chat-with-your-Data-TastyBytes-Snowflake-Claude-API/streamlit_code.py"

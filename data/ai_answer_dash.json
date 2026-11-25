@@ -1,0 +1,42 @@
+{
+    "metrics": [
+        {
+            "name": "Top avg sales per member",
+            "value": "$3,070.18"
+        },
+        {
+            "name": "Lowest avg sales per member",
+            "value": "$2,093.80"
+        },
+        {
+            "name": "Total loyalty members",
+            "value": "222,540"
+        }
+    ],
+    "chart": {
+        "mark": "bar",
+        "title": "Average lifetime sales per loyalty member by country",
+        "x": {
+            "field": "AVG_TOTAL_SALES",
+            "type": "quantitative",
+            "title": "Avg sales per member (USD)",
+            "sort": null,
+            "format": "$,.0f"
+        },
+        "y": {
+            "field": "COUNTRY",
+            "type": "nominal",
+            "title": "Country",
+            "sort": "-x",
+            "format": null
+        },
+        "color": null,
+        "tooltip": [
+            "COUNTRY",
+            "AVG_TOTAL_SALES",
+            "AVG_VISITED_LOCATIONS",
+            "NUMBER_MEMBERS"
+        ]
+    },
+    "interpretation": "**Broadly yes**: in every country, members generate substantial lifetime sales (**$2,094 to $3,070 each**) and visit about 49 to 69 locations. **Germany** leads with **$3,070.18** and 65.87 locations per member, while the **United States** is lowest at **$2,093.80** and 50.89 locations, despite having the largest base of 46,300 members. Sales and locations visited tend to rise together: Spain and South Africa have the most varied visits (around 69) and rank high on sales. *There is no non-member baseline in the data*, so this shows engagement, not that the program causes higher spending. Countries refer to member residence, not where purchases happened."
+}
