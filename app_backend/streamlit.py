@@ -3,6 +3,22 @@ import streamlit as st
 import time
 import altair as alt
 
+@st.dialog("Input your credentials", dismissible=False)
+def ask_credentials():
+    st.caption("These will only live on this current session, nothing will be saved or registered elsewhere.")
+    # Asking the user their credentials with texts inputs
+    account = st.text_input(":blue[Snowflake] Account ID")
+    user = st.text_input(":blue[Snowflake] Username")
+    password = st.text_input(":blue[Snowflake] Password", type="password")
+    api_key = st.text_input(":orange[Anthropic] API key", type="password")
+    
+    if st.button("Connect", type="primary"): # Checking if the button was pressed
+        if all([account, user, password, api_key]):
+            # Saving everything on the session_state in a dictionary on 'creds'
+            st.session_state.creds = dict(account=account, user=user, password=password, api_key=api_key)
+            st.rerun() # Closes the dialog and reruns the app without it 
+        else:
+            st.error("ALL credentials are needed, complete all fields to proceed.") # This will pop up if the credentials are incomplete after the button is pressed
 
 def stream_ai_response(ai_answer):
     # Function for writing ai responses as a stream of text
@@ -19,14 +35,15 @@ def st_chat_msg(role, txt, avatar=None):
             st.write_stream(stream_ai_response(txt)) # If role is assistant, it will show the text as a stream of words 
     st.session_state.messages.append({'role':role, 'content':txt})
 
-def set_axis(cls, spec):
+def set_axis(cls, spec, mark):
     # Axis set up
     # ``cls`` should X or Y altair objects (cls = alt.X / alt.Y)
     # ``spec`` are the specifications of the given axis (chart_specs['x'] / chart_specs['y'])
-    labelAngle = 45 if alt.X else alt.Undefined # If it is the X object, it will rotate -45 deegrees the x tick labels
-    return cls(field=spec['field'], type=spec['type'], title=spec['title'],
+    labelAngle = -45 if alt.X else alt.Undefined # If it is the X object, it will rotate -45 deegrees the x tick labels
+    ax = cls(field=spec['field'], type=spec['type'], title=spec['title'],
                sort=spec['sort'] or alt.Undefined,
-               axis=alt.Axis(format=spec['format'], labelAngle=labelAngle) if spec['format'] else alt.Undefined) #labelAngle=-45
+               axis=alt.Axis(format=spec['format'], labelAngle=labelAngle) if spec['format'] else alt.Axis(labelAngle=labelAngle)) 
+    return ax.scale(zero=False) if mark in ('line','point') else ax # if the graph is a line or point chart, its scale won't start from zero, which is not the default
 
 def set_color(spec, mark):
     # Color set up
@@ -67,8 +84,8 @@ def build_graph(data, specs):
     # Obtaining the corresponging altair chart (alt.Chart(data).mark_bar() for 'bar' mark type, and so on...) and adding points just in case the graph is a line graph 
     chart = getattr(alt.Chart(data), MARKS[mark])(**({'point': True} if mark == 'line' else {}))
     chart = chart.encode(
-        x=set_axis(alt.X, specs['x']), # Using set_axis() for X axis
-        y=set_axis(alt.Y, specs['y']), # Using set_axis() for Y axis
+        x=set_axis(alt.X, specs['x'], mark=mark), # Using set_axis() for X axis
+        y=set_axis(alt.Y, specs['y'], mark=mark), # Using set_axis() for Y axis
         color=set_color(specs['color'], mark) if specs.get('color') else alt.Undefined, # Using set_color() for color if it exists, but if it is None, it uses alt.Undefined instead
         tooltip=specs.get('tooltip') or alt.Undefined, # Getting 'tooltip' and using it if it exists, but if it is None, it uses alt.Undefined instead
     ).configure(
