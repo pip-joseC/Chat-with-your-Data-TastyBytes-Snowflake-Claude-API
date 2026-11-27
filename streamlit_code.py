@@ -13,9 +13,6 @@ import anthropic
 from app_backend.prompting import *
 from app_backend.streamlit import *
 
-# TODO:
-# Hacer README detallado con los archivos que hay, que incluya el setup necesario para ejecutar la app (recuerda que cargar la base de datos de Tasty bytes a Snowflake con el primer Notebook es necesario)
-
 # Loading the background written in CSS and the color icon for the chat messages
 st.markdown(
     """
