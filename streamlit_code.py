@@ -2,6 +2,7 @@ import numpy as np
 import streamlit as st
 from snowflake.snowpark import Session
 import os
+import base64, io
 from dotenv import load_dotenv
 import time
 from PIL import Image
@@ -108,7 +109,14 @@ st.radio( # Radio selection for choosing the claude mode (choosing the system pr
 
 st.divider()
 
-image = Image.open('assets/Claude full icon orange.png') #Loading Claude Icon image and resizing
+@st.cache_resource
+def load_avatar(path, size=128):
+    img = Image.open(path).convert("RGBA").resize((size, size))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+image = load_avatar('assets/Claude full icon orange.png') #Loading Claude Icon image and resizing
 
 # Display chat messages from history on app rerun
 for message in st.session_state.messages:
