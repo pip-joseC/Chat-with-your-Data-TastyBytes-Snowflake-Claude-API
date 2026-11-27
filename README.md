@@ -4,7 +4,7 @@ A conversational analytics assistant: ask a business question in plain English, 
 
 In the following GIF, a demo of how the app should look can be seen. 
 
-> *NOTE: The loading times have benn reduced to just 1 second, just to show the important features of the app.*
+> *NOTE: The loading times have been reduced to just 1 second, just to show the important features of the app.*
 
 <p align="center">
   <img src="sample_images/video_sample.gif" alt="End-to-end demo of the app" width="800">
@@ -16,7 +16,7 @@ In the following GIF, a demo of how the app should look can be seen.
 
 The app lets non-technical users get answers from a data warehouse **without writing SQL**. Behind one chat input, the app:
 
-1. **Translates** a natural-language question into a Snowflake SQL query (text-to-SQL), based on the documentation of the database.
+1. **Translates** a natural-language question into a Snowflake SQL query (text-to-SQL), based on the documentation of the database *(documentation made manually, Claude does NOT have access to the database itself)*.
 2. **Asks for clarification** when the question is too vague to turn into a reliable query.
 3. **Runs** the query on Snowflake with a read-only role, and **fixes itself** if the query fails: Claude gets the error message and rewrites the query, with up to 2 retries.
 4. **Interprets** the result: Claude computes 1–3 key metrics, chooses the right chart type and writes a short business explanation.
@@ -92,6 +92,7 @@ Claude picks the chart type from the shape of the result (time series, rankings,
 ```
 ├── streamlit_code.py          # Main app page (chat + query pipeline)
 ├── pages/dashboard.py         # Dashboard page
+├── requirements.txt           # App dependencies (local install & Streamlit Cloud)
 ├── app_backend/
 │   ├── prompting.py           # Claude API functions (SQL generation, clarification, bug fixing, dashboard, token cost)
 │   └── streamlit.py           # UI helpers (credentials dialog, chat messages, Altair chart builder)
@@ -121,7 +122,17 @@ Claude picks the chart type from the shape of the result (time series, rankings,
 
    > ⚠️ Before running it, replace the username in the `GRANT ROLE ... TO USER CASQUITO127` statements with **your own Snowflake username**. The app connects with the `TASTY_READ_ONLY` role and the `TASTY_DE_WH` warehouse, so your user needs that role.
 
-### Option A: Run locally
+### Option A: Use it on Streamlit Community Cloud (no installation)
+
+👉 **[Open the app](https://chat-with-your-data-tastybytes-app-claude-api-12040327.streamlit.app/)**
+
+1. Open the link above.
+2. Enter your **Snowflake credentials** (account identifier, e.g. `orgname-accountname`, plus username and password) and your **Claude API key** in the dialog. They are kept only in the current session and are not saved anywhere.
+3. Choose a Claude mode and start asking questions.
+
+> Your Snowflake account must already have the Tasty Bytes database loaded, and your user must have the `TASTY_READ_ONLY` role (see *Prerequisites*).
+
+### Option B: Run locally
 
 1. **Clone the repository**
    ```bash
@@ -129,36 +140,31 @@ Claude picks the chart type from the shape of the result (time series, rankings,
    cd Chat-with-your-Data-TastyBytes-Snowflake-Claude-API
    ```
 
-2. **Create the Python environment** with one of the files in `python_environment/` (built with Conda on Windows):
-   - Recommended, using the environment file:
-     ```bash
-     conda env create -f python_environment/ClaudeSnowflake_env.yml
-     ```
-   - Exact replica, using the explicit spec file (Windows 64-bit only):
-     ```bash
-     conda create --name ClaudeSnowflake --file python_environment/explicit_ClaudeSnowflake_env.txt
-     ```
-   > The `.yml` file ends with a `prefix:` line pointing to the author's machine. You can delete that line, or ignore it, since Conda uses the `name` field.
-
-3. **Activate the environment and run the app**
+2. **Create and activate a virtual environment** (Python 3.11 recommended)
    ```bash
-   conda activate ClaudeSnowflake
+   python -m venv .venv
+   # Windows
+   .venv\Scripts\activate
+   # macOS / Linux
+   source .venv/bin/activate
+   ```
+
+3. **Install the dependencies and run the app**
+   ```bash
+   pip install -r requirements.txt
    streamlit run streamlit_code.py
    ```
 
-4. **Enter your credentials** in the dialog that opens: Snowflake account identifier (e.g. `orgname-accountname`), Snowflake username and password, and your Claude API key. They are kept only in the current session and are not saved anywhere.
+4. **Enter your credentials** in the dialog that opens, the same way as in Option A.
 
-> To run the **notebooks** (2 and 3), create a `.env` file in the project root with your Snowflake credentials and `ANTHROPIC_API_KEY`. `.env` is already in `.gitignore`.
+> **Full development environment (optional):** `requirements.txt` only includes what the app needs. To also run the notebooks (Jupyter, `sqlglot` for the prompt evaluation, etc.), use the Conda environment in `python_environment/` instead:
+> ```bash
+> conda env create -f python_environment/ClaudeSnowflake_env.yml
+> conda activate ClaudeSnowflake
+> ```
+> The notebooks (2 and 3) also need a `.env` file in the project root with your Snowflake credentials and `ANTHROPIC_API_KEY`. `.env` is already in `.gitignore`.
 
-### Option B: Use it on Streamlit Community Cloud
 
-> 🚧 *Deployment coming soon. The public link will be added here.*
-
-1. Open the app link: `https://<APP-URL>.streamlit.app`.
-2. Enter your **Snowflake credentials** and your **Claude API key** in the dialog. Your Snowflake account must already have the Tasty Bytes database loaded (see *Prerequisites*).
-3. Choose a Claude mode and start asking questions.
-
----
 
 ## Example questions
 
